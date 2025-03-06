@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Payment Processing Demo</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://js.stripe.com/v3/"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        .lds-ring {
+            display: inline-block;
+            position: relative;
+            width: 24px;
+            height: 24px;
+        }
+        .lds-ring div {
+            box-sizing: border-box;
+            display: block;
+            position: absolute;
+            width: 20px;
+            height: 20px;
+            margin: 2px;
+            border: 2px solid #fff;
+            border-radius: 50%;
+            animation: lds-ring 1.2s cubic-bezier(0.5, 0, 0.5, 1) infinite;
+            border-color: #fff transparent transparent transparent;
+        }
+        .lds-ring div:nth-child(1) { animation-delay: -0.45s; }
+        .lds-ring div:nth-child(2) { animation-delay: -0.3s; }
+        .lds-ring div:nth-child(3) { animation-delay: -0.15s; }
+        @keyframes lds-ring {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+    <div class="container mx-auto px-4 py-8 max-w-md">
+        <div class="bg-white rounded-lg shadow-lg p-6 mb-8">
+            <h1 class="text-2xl font-semibold text-gray-800 mb-6">Payment Demo</h1>
+            
+            <form id="payment-form" class="space-y-4">
+                <div>
+                    <label for="amount" class="block text-sm font-medium text-gray-700 mb-1">
+                        Amount (USD)
+                    </label>
+                    <input type="number" id="amount" name="amount" min="0.50" step="0.01" value="10.00"
+                        class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500">
+                </div>
+
+                <div>
+                    <label for="card-element" class="block text-sm font-medium text-gray-700 mb-1">
+                        Card Details
+                    </label>
+                    <div id="card-element" class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm">
+                        <!-- Stripe Card Element will be inserted here -->
+                    </div>
+                    <div id="card-errors" class="mt-2 text-sm text-red-600" role="alert"></div>
+                </div>
+
+                <button type="submit" id="submit-button"
+                    class="w-full bg-indigo-600 text-white py-2 px-4 rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 transition-colors">
+                    <span id="button-text">Pay Now</span>
+                    <div id="spinner" class="lds-ring hidden"><div></div><div></div><div></div><div></div></div>
+                </button>
+            </form>
+        </div>
+
+        <div id="payment-status" class="hidden rounded-lg p-4 mb-4"></div>
+    </div>
+
+    <script>
+        // Initialize Stripe
+        const stripe = Stripe('your_publishable_key'); // Replace with your Stripe publishable key
+        const elements = stripe.elements();
+
+        // Create card Element and mount it
+        const card = elements.create('card', {
+            style: {
+                base: {
+                    fontSize: '16px',
+                    color: '#32325d',
+                    fontFamily: '"Inter", sans-serif',
+                    '::placeholder': {
+                        color: '#aab7c4'
+                    }
+                },
+                invalid: {
+                    color: '#dc2626',
+                    iconColor: '#dc2626'
+                }
+            }
+        });
+        card.mount('#card-element');
+
+        // Handle form submission
+        const form = document.getElementById('payment-form');
+        const submitButton = document.getElementById('submit-button');
+        const spinner = document.getElementById('spinner');
+        const buttonText = document.getElementById('button-text');
+        const paymentStatus = document.getElementById('payment-status');
+
+        form.addEventListener('submit', async (event) => {
+            event.preventDefault();
+            setLoading(true);
+
+            try {
+                // Create payment intent
+                const amount = Math.round(parseFloat(document.getElementById('amount').value) * 100);
+                const response = await fetch('/api/v1/payment/create-intent', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        amount: amount,
+                        currency: 'usd'
+                    })
+                });
+
+                const data = await response.json();
+                
+                if (data.error) {
+                    throw new Error(data.error);
+                }
+
+                // Confirm payment with Stripe
+                const { error: stripeError, paymentIntent } = await stripe.confirmCardPayment(
+                    data.clientSecret,
+                    {
+                        payment_method: {
+                            card: card,
+                        }
+                    }
+                );
+
+                if (stripeError) {
+                    throw new Error(stripeError.message);
+                }
+
+                // Payment successful
+                showStatus('success', 'Payment successful! Thank you for your purchase.');
+                form.reset();
+                card.clear();
+
+            } catch (error) {
+                showStatus('error', `Payment failed: ${error.message}`);
+            }
+
+            setLoading(false);
+        });
+
+        function setLoading(isLoading) {
+            submitButton.disabled = isLoading;
+            spinner.classList.toggle('hidden', !isLoading);
+            buttonText.classList.toggle('hidden', isLoading);
+        }
+
+        function showStatus(type, message) {
+            const bgColor = type === 'success' ? 'bg-green-100' : 'bg-red-100';
+            const textColor = type === 'success' ? 'text-green-800' : 'text-red-800';
+            
+            paymentStatus.className = `rounded-lg p-4 mb-4 ${bgColor} ${textColor}`;
+            paymentStatus.textContent = message;
+            paymentStatus.classList.remove('hidden');
+
+            setTimeout(() => {
+                paymentStatus.classList.add('hidden');
+            }, 5000);
+        }
+
+        // Handle card Element errors
+        card.addEventListener('change', ({error}) => {
+            const displayError = document.getElementById('card-errors');
+            if (error) {
+                displayError.textContent = error.message;
+            } else {
+                displayError.textContent = '';
+            }
+        });
+    </script>
+</body>
+</html>
